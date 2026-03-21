@@ -1,56 +1,40 @@
-# Simple Whop checkout in one PHP file
+# Store Discount checkout
 
-This project is now a single-file PHP integration.
+This project creates a Whop checkout from `GET` parameters and forwards successful payment notifications to an external delivery endpoint.
 
-## What `index.php` does
+## Flow
 
-- `GET /index.php?userID=123&postID=456&price=36`
-  - validates `userID`
-  - validates `price` against `14, 17, 36, 65, 105`
-  - maps the price to the correct Whop plan ID
-  - creates a Whop checkout configuration
-  - redirects the user to Whop's hosted checkout URL
-- `POST /index.php?action=webhook`
-  - verifies the Whop webhook signature
-  - processes `payment.succeeded`
-  - forwards the delivery payload to your external website
-- `GET /index.php?action=return&status=success&userID=123&postID=456&price=36`
-  - optional success page
-  - optionally pings the external website immediately
-  - the webhook is still the primary source of truth
+1. The customer lands on `/checkout?userID=...&postID=...&price=...`.
+2. The app validates the incoming price against the supported values: `14`, `17`, `36`, `65`, `105`.
+3. The page maps the price to a Whop plan ID, creates a checkout configuration, and renders the embedded Whop checkout.
+4. On redirect back to `/checkout/complete`, the app attempts an immediate delivery notification.
+5. The reliable fulfillment path is `/api/whop/webhook`, which processes `payment.succeeded` and forwards the event to your external website.
 
-## Environment variables
+## Endpoints
 
-Copy `.env.example` into your server environment and set:
+- `GET /checkout`: renders the embedded checkout.
+- `GET /api/checkout-session`: creates a checkout session and returns JSON if you want to integrate from another frontend.
+- `POST /api/whop/webhook`: validates the Whop webhook and forwards a delivery payload to your external site.
 
-- `APP_BASE_URL`
-- `WHOP_API_KEY`
-- `WHOP_COMPANY_ID`
-- `WHOP_PLAN_14`
-- `WHOP_PLAN_17`
-- `WHOP_PLAN_36`
-- `WHOP_PLAN_65`
-- `WHOP_PLAN_105`
-- `WHOP_WEBHOOK_SECRET`
-- `EXTERNAL_DELIVERY_WEBHOOK_URL`
-- `EXTERNAL_DELIVERY_WEBHOOK_TOKEN` (optional)
+## Delivery payload sent to the external site
 
-## Local testing
-
-Run a local PHP server:
-
-```bash
-php -S 127.0.0.1:8000
+```json
+{
+  "event": "payment.succeeded",
+  "source": "whop_webhook",
+  "paymentId": "pay_xxx",
+  "checkoutSessionId": "ch_xxx",
+  "userId": "123",
+  "postId": "456",
+  "price": 36,
+  "rawWhopPayload": {}
+}
 ```
 
-Then open:
+## Configuration
 
-```text
-http://127.0.0.1:8000/index.php?userID=123&postID=456&price=36
-```
+Copy `.env.example` to `.env.local` and fill in the Whop company credentials, the fixed plan IDs, and the external webhook URL.
 
-Webhook URL:
+## Important note
 
-```text
-http://127.0.0.1:8000/index.php?action=webhook
-```
+The return page notification is only a convenience path. Your external website should trust the server-to-server Whop webhook notification as the final source of truth for delivery.
