@@ -12,10 +12,8 @@
 
 const HANDLEBUY_URL = 'https://giorgiobts.com/php/handlebuy.php';
 const HANDLEBUY_TOKEN = '79a0f3827ef97ebdef591918448dc7d3471b49235664e26235f184b413bc885c';
+const INTERNAL_SIGNING_SECRET = 'change_me_whop_to_handlebuy_signing_secret';
 const WEBHOOK_LOG_FILE = 'whop_webhook_debug.txt';
-if (file_exists(__DIR__ . '/whop-config.php')) {
-    require_once __DIR__ . '/whop-config.php';
-}
 
 function env_or_default(string $key, string $default = ''): string {
     $value = getenv($key);
@@ -125,17 +123,11 @@ function compute_balance_delta(string $offerCode, $amountField): float {
 }
 
 $rawBody = file_get_contents('php://input');
-$whopSecret = env_or_default('WHOP_WEBHOOK_SECRET', defined('WHOP_WEBHOOK_SECRET') ? WHOP_WEBHOOK_SECRET : '');
-$internalSigningSecret = env_or_default('WHOP_INTERNAL_SIGNING_SECRET', defined('WHOP_INTERNAL_SIGNING_SECRET') ? WHOP_INTERNAL_SIGNING_SECRET : '');
+$whopSecret = env_or_default('WHOP_WEBHOOK_SECRET', '');
 
 if (!is_valid_whop_signature($rawBody, $whopSecret)) {
     log_line('Invalid webhook signature.');
     send_json(['ok' => false, 'error' => 'Invalid signature'], 403);
-}
-
-if ($internalSigningSecret === '') {
-    log_line('Missing internal signing secret.');
-    send_json(['ok' => false, 'error' => 'Missing internal signing secret'], 500);
 }
 
 $event = json_decode($rawBody, true);
@@ -204,7 +196,7 @@ $signaturePayload = implode('|', [
     $paymentRef,
     $timestamp,
 ]);
-$signature = hash_hmac('sha256', $signaturePayload, $internalSigningSecret);
+$signature = hash_hmac('sha256', $signaturePayload, INTERNAL_SIGNING_SECRET);
 
 $postData = [
     'userID' => $userID,
