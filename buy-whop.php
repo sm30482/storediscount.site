@@ -76,7 +76,8 @@ function create_whop_checkout_session(array $params): array {
         $payload['company_id'] = $companyId;
     }
 
-    $ch = curl_init(WHOP_API_BASE . '/checkout-configurations');
+    // Whop v5 endpoint uses underscore naming.
+    $ch = curl_init(WHOP_API_BASE . '/checkout_configurations');
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Authorization: Bearer ' . $apiKey,
@@ -117,7 +118,7 @@ function create_whop_checkout_session(array $params): array {
         ];
     }
 
-    $checkoutUrl = $decoded['purchase_url'] ?? null;
+    $checkoutUrl = $decoded['purchase_url'] ?? ($decoded['data']['purchase_url'] ?? null);
     if (!$checkoutUrl) {
         return [
             'ok' => false,
@@ -183,7 +184,16 @@ if ($userID === '') {
 }
 
 $postID = htmlspecialchars($_GET['postID'] ?? '');
-$mode = $_GET['mode'] ?? 'bundle';
+$mode = $_GET['mode'] ?? '';
+if ($mode === '') {
+    // Backward-compatible behavior with buy.php:
+    // if individual context is present, render single purchase button.
+    if (isset($_GET['postPrice'])) {
+        $mode = 'single';
+    } else {
+        $mode = 'bundle';
+    }
+}
 if (!in_array($mode, ['single', 'bundle'], true)) {
     $mode = 'bundle';
 }
