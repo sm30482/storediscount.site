@@ -10,6 +10,10 @@
  */
 
 const WHOP_API_BASE = 'https://api.whop.com/api/v5';
+if (file_exists(__DIR__ . '/whop-config.php')) {
+    require_once __DIR__ . '/whop-config.php';
+}
+
 function env_or_default(string $key, string $default = ''): string {
     $value = getenv($key);
     if ($value === false || $value === null || $value === '') {
@@ -26,20 +30,13 @@ function json_response(array $payload, int $status = 200): void {
 }
 
 function create_whop_checkout_session(array $params): array {
-    $apiKey = env_or_default('WHOP_API_KEY');
-    $companyId = env_or_default('WHOP_COMPANY_ID');
+    $apiKey = env_or_default('WHOP_API_KEY', defined('WHOP_API_KEY') ? WHOP_API_KEY : '');
+    $companyId = env_or_default('WHOP_COMPANY_ID', defined('WHOP_COMPANY_ID') ? WHOP_COMPANY_ID : '');
 
     if ($apiKey === '') {
         return [
             'ok' => false,
-            'error' => 'Missing WHOP_API_KEY environment variable.',
-        ];
-    }
-
-    if ($companyId === '') {
-        return [
-            'ok' => false,
-            'error' => 'Missing WHOP_COMPANY_ID environment variable.',
+            'error' => 'Missing Whop API key. Set WHOP_API_KEY or WHOP_API_KEY in whop-config.php.',
         ];
     }
 
@@ -64,7 +61,6 @@ function create_whop_checkout_session(array $params): array {
     ];
 
     $payload = [
-        'company_id' => $companyId,
         'mode' => 'payment',
         'plan' => [
             'plan_type' => 'one_time',
@@ -76,6 +72,9 @@ function create_whop_checkout_session(array $params): array {
         // Kept for compatibility with support guidance about SDK dynamic UTMs.
         'utm' => $utm,
     ];
+    if ($companyId !== '') {
+        $payload['company_id'] = $companyId;
+    }
 
     $ch = curl_init(WHOP_API_BASE . '/checkout-configurations');
     curl_setopt($ch, CURLOPT_POST, true);

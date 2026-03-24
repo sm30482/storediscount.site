@@ -12,8 +12,10 @@
 
 const HANDLEBUY_URL = 'https://giorgiobts.com/php/handlebuy.php';
 const HANDLEBUY_TOKEN = '79a0f3827ef97ebdef591918448dc7d3471b49235664e26235f184b413bc885c';
-const INTERNAL_SIGNING_SECRET = 'change_me_whop_to_handlebuy_signing_secret';
 const WEBHOOK_LOG_FILE = 'whop_webhook_debug.txt';
+if (file_exists(__DIR__ . '/whop-config.php')) {
+    require_once __DIR__ . '/whop-config.php';
+}
 
 function env_or_default(string $key, string $default = ''): string {
     $value = getenv($key);
@@ -35,7 +37,7 @@ function send_json(array $payload, int $status = 200): void {
 }
 
 function parse_whop_signatures(string $header): array {
-    $parts = array_map('trim', explode(' ', $header));
+    $parts = preg_split('/[\s]+/', trim($header)) ?: [];
     $signatures = [];
 
     foreach ($parts as $part) {
@@ -51,6 +53,11 @@ function parse_whop_signatures(string $header): array {
         if (strpos($part, 'v1=') === 0) {
             $signatures[] = substr($part, 3);
             continue;
+        }
+
+        // Support raw base64 signatures if header comes pre-split by upstream.
+        if (preg_match('/^[A-Za-z0-9+\/=]+$/', $part)) {
+            $signatures[] = $part;
         }
     }
 
@@ -123,11 +130,17 @@ function compute_balance_delta(string $offerCode, $amountField): float {
 }
 
 $rawBody = file_get_contents('php://input');
-$whopSecret = env_or_default('WHOP_WEBHOOK_SECRET', '');
+$whopSecret = env_or_default('WHOP_WEBHOOK_SECRET', defined('WHOP_WEBHOOK_SECRET') ? WHOP_WEBHOOK_SECRET : '');
+$internalSigningSecret = env_or_default('WHOP_INTERNAL_SIGNING_SECRET', defined('WHOP_INTERNAL_SIGNING_SECRET') ? WHOP_INTERNAL_SIGNING_SECRET : '');
 
 if (!is_valid_whop_signature($rawBody, $whopSecret)) {
     log_line('Invalid webhook signature.');
     send_json(['ok' => false, 'error' => 'Invalid signature'], 403);
+}
+
+if ($internalSigningSecret === '') {
+    log_line('Missing internal signing secret.');
+    send_json(['ok' => false, 'error' => 'Missing internal signing secret'], 500);
 }
 
 $event = json_decode($rawBody, true);
@@ -164,7 +177,7 @@ if (!is_array($utm)) {
     $utm = [];
 }
 
-$userID = (string)($metadata['userID'] ?? $utm['source'] ?? '');
+$userID = (string)($metadata['userID'] ?? '');
 $postID = (string)($metadata['postID'] ?? '');
 $offerCode = (string)($metadata['offerCode'] ?? $utm['content'] ?? '');
 $paymentRef = (string)($metadata['paymentRef'] ?? $utm['term'] ?? value_from_paths($event, [
@@ -196,7 +209,7 @@ $signaturePayload = implode('|', [
     $paymentRef,
     $timestamp,
 ]);
-$signature = hash_hmac('sha256', $signaturePayload, INTERNAL_SIGNING_SECRET);
+$signature = hash_hmac('sha256', $signaturePayload, $internalSigningSecret);
 
 $postData = [
     'userID' => $userID,
