@@ -100,6 +100,21 @@ function resolve_checkout_url(string $offerCode, string $mode): string {
     return defined('WHOP_CHECKOUT_URL_DEFAULT') ? (string)WHOP_CHECKOUT_URL_DEFAULT : '';
 }
 
+function resolve_amount_checkout_url(float $amount): string {
+    $normalizedAmount = (int)round($amount);
+    $map = defined('WHOP_CHECKOUT_LINK_MAP') && is_array(WHOP_CHECKOUT_LINK_MAP)
+        ? WHOP_CHECKOUT_LINK_MAP
+        : [
+            14 => 'https://whop.com/checkout/plan_Pyv6fR1Ztz8DU',
+            17 => 'https://whop.com/checkout/plan_qCTYyjhezoUZl',
+            42 => 'https://whop.com/checkout/plan_JWOleG7zIX9xt',
+            84 => 'https://whop.com/checkout/plan_qPCoQkR5QaBKh',
+            140 => 'https://whop.com/checkout/plan_Pyv6fR1Ztz8DU',
+        ];
+
+    return $map[$normalizedAmount] ?? '';
+}
+
 function whop_api_post(string $path, string $apiKey, array $payload): array {
     $url = WHOP_API_BASE . $path;
     $ch = curl_init($url);
@@ -140,6 +155,21 @@ function create_whop_checkout_session(array $params): array {
 
     $amount = (float)$params['amount'];
     $currency = $params['currency'];
+
+    $mappedCheckoutUrl = resolve_amount_checkout_url($amount);
+    if ($mappedCheckoutUrl !== '') {
+        buy_log('Using mapped static checkout URL by amount', [
+            'amount' => $amount,
+            'offerCode' => $params['offerCode'],
+            'mode' => $params['mode'],
+        ]);
+        return [
+            'ok' => true,
+            'checkoutUrl' => $mappedCheckoutUrl,
+            'sessionId' => null,
+            'fallback' => 'amount_checkout_map',
+        ];
+    }
 
     $utm = [
         'source' => 'storediscounts',

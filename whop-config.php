@@ -33,3 +33,12 @@ const WHOP_DEFAULT_PLAN_ID = '';
 const WHOP_CHECKOUT_URL_BUNDLE = '';
 const WHOP_CHECKOUT_URL_SINGLE = '';
 const WHOP_CHECKOUT_URL_DEFAULT = '';
+
+// Fast-path amount => checkout link mapping.
+const WHOP_CHECKOUT_LINK_MAP = [
+    14 => 'https://whop.com/checkout/plan_Pyv6fR1Ztz8DU',
+    17 => 'https://whop.com/checkout/plan_qCTYyjhezoUZl',
+    42 => 'https://whop.com/checkout/plan_JWOleG7zIX9xt',
+    84 => 'https://whop.com/checkout/plan_qPCoQkR5QaBKh',
+    140 => 'https://whop.com/checkout/plan_Pyv6fR1Ztz8DU',
+];
