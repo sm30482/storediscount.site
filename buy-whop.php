@@ -9,18 +9,10 @@
  * - postPrice (optional, used by single mode prefill)
  */
 
-const WHOP_API_BASE = 'https://api.whop.com/api/v5';
+const WHOP_API_BASE = 'https://api.whop.com/api/v2';
 const WHOP_BUY_LOG_FILE = 'whop_buy_debug.txt';
 if (file_exists(__DIR__ . '/whop-config.php')) {
     require_once __DIR__ . '/whop-config.php';
-}
-
-function env_or_default(string $key, string $default = ''): string {
-    $value = getenv($key);
-    if ($value === false || $value === null || $value === '') {
-        return $default;
-    }
-    return $value;
 }
 
 function json_response(array $payload, int $status = 200): void {
@@ -47,8 +39,8 @@ function buy_log(string $message, array $context = []): void {
 }
 
 function create_whop_checkout_session(array $params): array {
-    $apiKey = env_or_default('WHOP_API_KEY', defined('WHOP_API_KEY') ? WHOP_API_KEY : '');
-    $companyId = env_or_default('WHOP_COMPANY_ID', defined('WHOP_COMPANY_ID') ? WHOP_COMPANY_ID : '');
+    $apiKey = defined('WHOP_API_KEY') ? WHOP_API_KEY : '';
+    $companyId = defined('WHOP_COMPANY_ID') ? WHOP_COMPANY_ID : '';
 
     if ($apiKey === '') {
         return [
@@ -130,13 +122,14 @@ function create_whop_checkout_session(array $params): array {
             'mode' => $params['mode'],
             'offerCode' => $params['offerCode'],
             'httpCode' => $httpCode,
-            'raw' => substr($raw, 0, 1000),
+            'raw' => substr((string)$raw, 0, 1000),
         ]);
+        $debugResponse = trim((string)$raw) === '' ? '<empty body>' : (string)$raw;
         return [
             'ok' => false,
             'error' => 'Invalid response from Whop API.',
             'raw' => $raw,
-            'debug_whop_response' => $raw,
+            'debug_whop_response' => $debugResponse,
             'status' => $httpCode,
         ];
     }

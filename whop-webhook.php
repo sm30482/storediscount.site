@@ -17,14 +17,6 @@ if (file_exists(__DIR__ . '/whop-config.php')) {
     require_once __DIR__ . '/whop-config.php';
 }
 
-function env_or_default(string $key, string $default = ''): string {
-    $value = getenv($key);
-    if ($value === false || $value === null || $value === '') {
-        return $default;
-    }
-    return $value;
-}
-
 function log_line(string $line): void {
     file_put_contents(WEBHOOK_LOG_FILE, '[' . date('Y-m-d H:i:s') . '] ' . $line . "\n", FILE_APPEND);
 }
@@ -142,8 +134,8 @@ function compute_balance_delta(string $offerCode, $amountField): float {
 }
 
 $rawBody = file_get_contents('php://input');
-$whopSecret = env_or_default('WHOP_WEBHOOK_SECRET', defined('WHOP_WEBHOOK_SECRET') ? WHOP_WEBHOOK_SECRET : '');
-$internalSigningSecret = env_or_default('WHOP_INTERNAL_SIGNING_SECRET', defined('WHOP_INTERNAL_SIGNING_SECRET') ? WHOP_INTERNAL_SIGNING_SECRET : '');
+$whopSecret = defined('WHOP_WEBHOOK_SECRET') ? WHOP_WEBHOOK_SECRET : '';
+$internalSigningSecret = defined('WHOP_INTERNAL_SIGNING_SECRET') ? WHOP_INTERNAL_SIGNING_SECRET : '';
 
 if (!is_valid_whop_signature($rawBody, $whopSecret)) {
     log_event('Invalid webhook signature', [
