@@ -15,3 +15,21 @@ const WHOP_COMPANY_ID = '';
 // Keep this synced with handlebuy.php signature verification logic.
 const WHOP_INTERNAL_SIGNING_SECRET = 'change_me_whop_to_handlebuy_signing_secret';
 
+// Optional fallback for API keys that cannot call /checkout_configurations.
+// Dynamic fallback (single product, variable amount):
+const WHOP_PRODUCT_ID = '';
+//
+// You can define plan IDs per offer code:
+// - offerCode "bundle_42"  => WHOP_PLAN_ID_BUNDLE_42
+// - offerCode "single_17"  => WHOP_PLAN_ID_SINGLE_17
+// Or define mode/default-level fallbacks below.
+const WHOP_PLAN_ID_BUNDLE = '';
+const WHOP_PLAN_ID_SINGLE = '';
+const WHOP_DEFAULT_PLAN_ID = '';
+
+// Optional direct checkout URL fallback for API keys without Payins write scopes.
+// You can set offer-specific values (WHOP_CHECKOUT_URL_BUNDLE_42), mode defaults,
+// or a global default.
+const WHOP_CHECKOUT_URL_BUNDLE = '';
+const WHOP_CHECKOUT_URL_SINGLE = '';
+const WHOP_CHECKOUT_URL_DEFAULT = '';
