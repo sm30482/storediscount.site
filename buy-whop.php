@@ -83,6 +83,38 @@ function resolve_checkout_session_payload(array $params, array $metadata, array 
     return [];
 }
 
+function resolve_checkout_url(string $offerCode, string $mode): string {
+    $normalized = strtoupper(preg_replace('/[^A-Za-z0-9]+/', '_', $offerCode));
+    $offerConstant = 'WHOP_CHECKOUT_URL_' . $normalized;
+    if (defined($offerConstant) && (string)constant($offerConstant) !== '') {
+        return (string)constant($offerConstant);
+    }
+
+    if ($mode === 'single' && defined('WHOP_CHECKOUT_URL_SINGLE') && WHOP_CHECKOUT_URL_SINGLE !== '') {
+        return WHOP_CHECKOUT_URL_SINGLE;
+    }
+    if ($mode === 'bundle' && defined('WHOP_CHECKOUT_URL_BUNDLE') && WHOP_CHECKOUT_URL_BUNDLE !== '') {
+        return WHOP_CHECKOUT_URL_BUNDLE;
+    }
+
+    return defined('WHOP_CHECKOUT_URL_DEFAULT') ? (string)WHOP_CHECKOUT_URL_DEFAULT : '';
+}
+
+function resolve_amount_checkout_url(float $amount): string {
+    $normalizedAmount = (int)round($amount);
+    $map = defined('WHOP_CHECKOUT_LINK_MAP') && is_array(WHOP_CHECKOUT_LINK_MAP)
+        ? WHOP_CHECKOUT_LINK_MAP
+        : [
+            14 => 'https://whop.com/checkout/plan_Pyv6fR1Ztz8DU',
+            17 => 'https://whop.com/checkout/plan_qCTYyjhezoUZl',
+            42 => 'https://whop.com/checkout/plan_JWOleG7zIX9xt',
+            84 => 'https://whop.com/checkout/plan_qPCoQkR5QaBKh',
+            140 => 'https://whop.com/checkout/plan_Pyv6fR1Ztz8DU',
+        ];
+
+    return $map[$normalizedAmount] ?? '';
+}
+
 function whop_api_post(string $path, string $apiKey, array $payload): array {
     $url = WHOP_API_BASE . $path;
     $ch = curl_init($url);
@@ -123,6 +155,21 @@ function create_whop_checkout_session(array $params): array {
 
     $amount = (float)$params['amount'];
     $currency = $params['currency'];
+
+    $mappedCheckoutUrl = resolve_amount_checkout_url($amount);
+    if ($mappedCheckoutUrl !== '') {
+        buy_log('Using mapped static checkout URL by amount', [
+            'amount' => $amount,
+            'offerCode' => $params['offerCode'],
+            'mode' => $params['mode'],
+        ]);
+        return [
+            'ok' => true,
+            'checkoutUrl' => $mappedCheckoutUrl,
+            'sessionId' => null,
+            'fallback' => 'amount_checkout_map',
+        ];
+    }
 
     $utm = [
         'source' => 'storediscounts',
@@ -213,11 +260,27 @@ function create_whop_checkout_session(array $params): array {
     }
 
     if ($httpCode < 200 || $httpCode >= 300) {
+        $directCheckoutUrl = resolve_checkout_url((string)$params['offerCode'], (string)$params['mode']);
+        if ($directCheckoutUrl !== '') {
+            buy_log('Using static checkout URL fallback after Whop API error', [
+                'offerCode' => $params['offerCode'],
+                'mode' => $params['mode'],
+                'failedPath' => $apiPath,
+                'failedStatus' => $httpCode,
+            ]);
+            return [
+                'ok' => true,
+                'checkoutUrl' => $directCheckoutUrl,
+                'sessionId' => null,
+                'fallback' => 'static_checkout_url',
+            ];
+        }
+
         if ($httpCode === 401 && $apiPath === '/checkout_configurations') {
             $requiredPlanConstant = 'WHOP_PLAN_ID_' . strtoupper(preg_replace('/[^A-Za-z0-9]+/', '_', (string)$params['offerCode']));
             return [
                 'ok' => false,
-                'error' => 'Whop API key cannot create checkout configurations. Set WHOP_PRODUCT_ID for dynamic pricing or set ' . $requiredPlanConstant . ' (or WHOP_PLAN_ID_SINGLE/WHOP_PLAN_ID_BUNDLE/WHOP_DEFAULT_PLAN_ID) in whop-config.php to enable checkout_sessions fallback.',
+                'error' => 'Whop API key cannot create checkout configurations. Configure one of: WHOP_CHECKOUT_URL_* (fastest), WHOP_PRODUCT_ID, or ' . $requiredPlanConstant . ' (or WHOP_PLAN_ID_SINGLE/WHOP_PLAN_ID_BUNDLE/WHOP_DEFAULT_PLAN_ID) in whop-config.php.',
                 'status' => $httpCode,
                 'path' => $apiPath,
                 'response' => $decoded,
