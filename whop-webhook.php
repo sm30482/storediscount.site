@@ -17,16 +17,19 @@ if (file_exists(__DIR__ . '/whop-config.php')) {
     require_once __DIR__ . '/whop-config.php';
 }
 
-function env_or_default(string $key, string $default = ''): string {
-    $value = getenv($key);
-    if ($value === false || $value === null || $value === '') {
-        return $default;
-    }
-    return $value;
-}
-
 function log_line(string $line): void {
     file_put_contents(WEBHOOK_LOG_FILE, '[' . date('Y-m-d H:i:s') . '] ' . $line . "\n", FILE_APPEND);
+}
+
+function log_event(string $line, array $context = []): void {
+    $safe = [];
+    foreach ($context as $key => $value) {
+        if (stripos((string)$key, 'secret') !== false || stripos((string)$key, 'signature') !== false) {
+            continue;
+        }
+        $safe[$key] = $value;
+    }
+    log_line($line . ' ' . json_encode($safe));
 }
 
 function send_json(array $payload, int $status = 200): void {
@@ -37,7 +40,8 @@ function send_json(array $payload, int $status = 200): void {
 }
 
 function parse_whop_signatures(string $header): array {
-    $parts = preg_split('/[\s]+/', trim($header)) ?: [];
+    $normalized = str_replace(',', ' ', trim($header));
+    $parts = preg_split('/[\s]+/', $normalized) ?: [];
     $signatures = [];
 
     foreach ($parts as $part) {
@@ -130,11 +134,14 @@ function compute_balance_delta(string $offerCode, $amountField): float {
 }
 
 $rawBody = file_get_contents('php://input');
-$whopSecret = env_or_default('WHOP_WEBHOOK_SECRET', defined('WHOP_WEBHOOK_SECRET') ? WHOP_WEBHOOK_SECRET : '');
-$internalSigningSecret = env_or_default('WHOP_INTERNAL_SIGNING_SECRET', defined('WHOP_INTERNAL_SIGNING_SECRET') ? WHOP_INTERNAL_SIGNING_SECRET : '');
+$whopSecret = defined('WHOP_WEBHOOK_SECRET') ? WHOP_WEBHOOK_SECRET : '';
+$internalSigningSecret = defined('WHOP_INTERNAL_SIGNING_SECRET') ? WHOP_INTERNAL_SIGNING_SECRET : '';
 
 if (!is_valid_whop_signature($rawBody, $whopSecret)) {
-    log_line('Invalid webhook signature.');
+    log_event('Invalid webhook signature', [
+        'webhook_id' => $_SERVER['HTTP_WEBHOOK_ID'] ?? '',
+        'webhook_timestamp' => $_SERVER['HTTP_WEBHOOK_TIMESTAMP'] ?? '',
+    ]);
     send_json(['ok' => false, 'error' => 'Invalid signature'], 403);
 }
 
@@ -155,7 +162,10 @@ $eventType = (string)value_from_paths($event, [
 ], '');
 
 if ($eventType !== 'payment.succeeded') {
-    log_line('Ignoring event type: ' . $eventType);
+    log_event('Ignoring event type', [
+        'event_type' => $eventType,
+        'event_id' => (string)value_from_paths($event, [['id'], ['data', 'id']], ''),
+    ]);
     send_json(['ok' => true, 'ignored' => true, 'event' => $eventType], 200);
 }
 
@@ -190,13 +200,23 @@ $amountField = $metadata['amount'] ?? value_from_paths($event, [
 ], 0);
 
 if ($userID === '' || $offerCode === '' || $paymentRef === '') {
-    log_line('Missing required metadata. userID=' . $userID . ', offerCode=' . $offerCode . ', paymentRef=' . $paymentRef);
+    // Do not infer userID from UTM/source. It must come from metadata.
+    log_event('Missing required metadata', [
+        'userID_present' => $userID !== '',
+        'offerCode_present' => $offerCode !== '',
+        'paymentRef_present' => $paymentRef !== '',
+        'event_id' => (string)value_from_paths($event, [['id'], ['data', 'id']], ''),
+    ]);
     send_json(['ok' => false, 'error' => 'Missing required metadata'], 400);
 }
 
 $balanceDelta = compute_balance_delta($offerCode, $amountField);
 if ($balanceDelta <= 0) {
-    log_line('Unable to compute balance delta for offerCode=' . $offerCode);
+    log_event('Unable to compute balance delta', [
+        'offerCode' => $offerCode,
+        'amountField' => $amountField,
+        'event_id' => (string)value_from_paths($event, [['id'], ['data', 'id']], ''),
+    ]);
     send_json(['ok' => false, 'error' => 'Invalid amount/offer code'], 400);
 }
 
@@ -235,11 +255,18 @@ $curlError = curl_error($ch);
 curl_close($ch);
 
 if ($curlError !== '') {
-    log_line('handlebuy curl error: ' . $curlError);
+    log_event('handlebuy curl error', [
+        'paymentRef' => $paymentRef,
+        'error' => $curlError,
+    ]);
     send_json(['ok' => false, 'error' => 'handlebuy request failed'], 500);
 }
 
-log_line('Fulfilled paymentRef=' . $paymentRef . '; handlebuyStatus=' . $httpCode . '; response=' . (string)$handlebuyResponse);
+log_event('Fulfilled payment webhook', [
+    'paymentRef' => $paymentRef,
+    'handlebuyStatus' => $httpCode,
+    'handlebuyResponse' => substr((string)$handlebuyResponse, 0, 400),
+]);
 
 send_json([
     'ok' => true,

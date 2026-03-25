@@ -9,17 +9,10 @@
  * - postPrice (optional, used by single mode prefill)
  */
 
-const WHOP_API_BASE = 'https://api.whop.com/api/v5';
+const WHOP_API_BASE = 'https://api.whop.com/api/v2';
+const WHOP_BUY_LOG_FILE = 'whop_buy_debug.txt';
 if (file_exists(__DIR__ . '/whop-config.php')) {
     require_once __DIR__ . '/whop-config.php';
-}
-
-function env_or_default(string $key, string $default = ''): string {
-    $value = getenv($key);
-    if ($value === false || $value === null || $value === '') {
-        return $default;
-    }
-    return $value;
 }
 
 function json_response(array $payload, int $status = 200): void {
@@ -29,9 +22,25 @@ function json_response(array $payload, int $status = 200): void {
     exit;
 }
 
+function buy_log(string $message, array $context = []): void {
+    $safeContext = [];
+    foreach ($context as $key => $value) {
+        if ($key === 'apiKey' || stripos((string)$key, 'secret') !== false) {
+            continue;
+        }
+        $safeContext[$key] = $value;
+    }
+
+    file_put_contents(
+        WHOP_BUY_LOG_FILE,
+        '[' . date('Y-m-d H:i:s') . '] ' . $message . ' ' . json_encode($safeContext) . "\n",
+        FILE_APPEND
+    );
+}
+
 function create_whop_checkout_session(array $params): array {
-    $apiKey = env_or_default('WHOP_API_KEY', defined('WHOP_API_KEY') ? WHOP_API_KEY : '');
-    $companyId = env_or_default('WHOP_COMPANY_ID', defined('WHOP_COMPANY_ID') ? WHOP_COMPANY_ID : '');
+    $apiKey = defined('WHOP_API_KEY') ? WHOP_API_KEY : '';
+    $companyId = defined('WHOP_COMPANY_ID') ? WHOP_COMPANY_ID : '';
 
     if ($apiKey === '') {
         return [
@@ -87,6 +96,7 @@ function create_whop_checkout_session(array $params): array {
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'storediscount-whop-checkout/1.0');
 
     $raw = curl_exec($ch);
     $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -94,6 +104,12 @@ function create_whop_checkout_session(array $params): array {
     curl_close($ch);
 
     if ($raw === false || $curlError !== '') {
+        buy_log('Whop API cURL failure', [
+            'mode' => $params['mode'],
+            'offerCode' => $params['offerCode'],
+            'httpCode' => $httpCode,
+            'curlError' => $curlError,
+        ]);
         return [
             'ok' => false,
             'error' => 'Whop API request failed: ' . $curlError,
@@ -102,14 +118,29 @@ function create_whop_checkout_session(array $params): array {
 
     $decoded = json_decode($raw, true);
     if (!is_array($decoded)) {
+        buy_log('Whop API invalid JSON response', [
+            'mode' => $params['mode'],
+            'offerCode' => $params['offerCode'],
+            'httpCode' => $httpCode,
+            'raw' => substr((string)$raw, 0, 1000),
+        ]);
+        $debugResponse = trim((string)$raw) === '' ? '<empty body>' : (string)$raw;
         return [
             'ok' => false,
             'error' => 'Invalid response from Whop API.',
             'raw' => $raw,
+            'debug_whop_response' => $debugResponse,
+            'status' => $httpCode,
         ];
     }
 
     if ($httpCode < 200 || $httpCode >= 300) {
+        buy_log('Whop API non-2xx response', [
+            'mode' => $params['mode'],
+            'offerCode' => $params['offerCode'],
+            'httpCode' => $httpCode,
+            'response' => $decoded,
+        ]);
         return [
             'ok' => false,
             'error' => 'Whop API error.',
@@ -120,6 +151,12 @@ function create_whop_checkout_session(array $params): array {
 
     $checkoutUrl = $decoded['purchase_url'] ?? ($decoded['data']['purchase_url'] ?? null);
     if (!$checkoutUrl) {
+        buy_log('Whop API missing purchase_url', [
+            'mode' => $params['mode'],
+            'offerCode' => $params['offerCode'],
+            'httpCode' => $httpCode,
+            'response' => $decoded,
+        ]);
         return [
             'ok' => false,
             'error' => 'Whop response did not include purchase_url.',
@@ -351,7 +388,13 @@ $defaultPostPrice = htmlspecialchars($_GET['postPrice'] ?? '14');
         $.post(window.location.href, payload)
             .done(function (res) {
                 if (!res || !res.ok || !res.checkoutUrl) {
-                    setStatus((res && res.error) ? res.error : 'Unable to create checkout session.', true);
+                    let message = (res && res.error) ? res.error : 'Unable to create checkout session.';
+                    if (res && res.debug_whop_response) {
+                        message += ' Debug: ' + String(res.debug_whop_response).substring(0, 400);
+                    } else if (res && res.response) {
+                        message += ' Debug: ' + JSON.stringify(res.response).substring(0, 400);
+                    }
+                    setStatus(message, true);
                     return;
                 }
 
@@ -376,6 +419,11 @@ $defaultPostPrice = htmlspecialchars($_GET['postPrice'] ?? '14');
                 let err = 'Failed to create checkout session.';
                 if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
                     err = xhr.responseJSON.error;
+                    if (xhr.responseJSON.debug_whop_response) {
+                        err += ' Debug: ' + String(xhr.responseJSON.debug_whop_response).substring(0, 400);
+                    } else if (xhr.responseJSON.response) {
+                        err += ' Debug: ' + JSON.stringify(xhr.responseJSON.response).substring(0, 400);
+                    }
                 }
                 setStatus(err, true);
             });
