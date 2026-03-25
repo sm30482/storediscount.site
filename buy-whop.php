@@ -56,6 +56,33 @@ function resolve_checkout_plan_id(string $offerCode, string $mode): string {
     return defined('WHOP_DEFAULT_PLAN_ID') ? (string)WHOP_DEFAULT_PLAN_ID : '';
 }
 
+function resolve_checkout_session_payload(array $params, array $metadata, array $utm): array {
+    $planId = resolve_checkout_plan_id((string)$params['offerCode'], (string)$params['mode']);
+    if ($planId !== '') {
+        return [
+            'plan_id' => $planId,
+            'metadata' => $metadata,
+            'utm' => $utm,
+        ];
+    }
+
+    $productId = defined('WHOP_PRODUCT_ID') ? (string)WHOP_PRODUCT_ID : '';
+    if ($productId !== '') {
+        return [
+            'price' => [
+                'product_id' => $productId,
+                'plan_type' => 'one_time',
+                'currency' => (string)$params['currency'],
+                'amount' => (float)$params['amount'],
+            ],
+            'metadata' => $metadata,
+            'utm' => $utm,
+        ];
+    }
+
+    return [];
+}
+
 function whop_api_post(string $path, string $apiKey, array $payload): array {
     $url = WHOP_API_BASE . $path;
     $ch = curl_init($url);
@@ -137,18 +164,13 @@ function create_whop_checkout_session(array $params): array {
     $apiPath = $result['path'];
 
     if (($httpCode === 401 || $httpCode === 404) && $curlError === '') {
-        $planId = resolve_checkout_plan_id((string)$params['offerCode'], (string)$params['mode']);
-        if ($planId !== '') {
+        $fallbackPayload = resolve_checkout_session_payload($params, $metadata, $utm);
+        if (!empty($fallbackPayload)) {
             buy_log('Primary Whop route unavailable; using checkout_sessions fallback', [
                 'offerCode' => $params['offerCode'],
                 'mode' => $params['mode'],
                 'primaryStatus' => $httpCode,
             ]);
-            $fallbackPayload = [
-                'plan_id' => $planId,
-                'metadata' => $metadata,
-                'utm' => $utm,
-            ];
             $fallback = whop_api_post('/checkout_sessions', $apiKey, $fallbackPayload);
             $raw = $fallback['raw'];
             $httpCode = $fallback['status'];
@@ -195,7 +217,7 @@ function create_whop_checkout_session(array $params): array {
             $requiredPlanConstant = 'WHOP_PLAN_ID_' . strtoupper(preg_replace('/[^A-Za-z0-9]+/', '_', (string)$params['offerCode']));
             return [
                 'ok' => false,
-                'error' => 'Whop API key cannot create checkout configurations. Set ' . $requiredPlanConstant . ' (or WHOP_PLAN_ID_SINGLE/WHOP_PLAN_ID_BUNDLE/WHOP_DEFAULT_PLAN_ID) in whop-config.php to enable checkout_sessions fallback.',
+                'error' => 'Whop API key cannot create checkout configurations. Set WHOP_PRODUCT_ID for dynamic pricing or set ' . $requiredPlanConstant . ' (or WHOP_PLAN_ID_SINGLE/WHOP_PLAN_ID_BUNDLE/WHOP_DEFAULT_PLAN_ID) in whop-config.php to enable checkout_sessions fallback.',
                 'status' => $httpCode,
                 'path' => $apiPath,
                 'response' => $decoded,
